@@ -3,7 +3,9 @@ from django.test import TestCase
 from django.test.client import RequestFactory
 from django.utils import unittest
 
-from django.contrib.auth.models import AnonymousUser, User
+from django.contrib.auth.models import AnonymousUser
+from django.contrib.auth import get_user_model
+User = get_user_model()
 
 from account.forms import SignupForm, LoginUsernameForm
 from account.views import SignupView, LoginView

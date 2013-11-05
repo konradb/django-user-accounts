@@ -108,7 +108,7 @@ Here is an example of these rules applied:
         A model for storing a task.
         """
         
-        creator = models.ForeignKey(User)
+        creator = models.ForeignKey(settings.AUTH_USER_MODEL)
         created = models.DateTimeField(default=timezone.now)
         modified = models.DateTimeField(default=timezone.now)
         

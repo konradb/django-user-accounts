@@ -14,7 +14,10 @@ from django.template.loader import render_to_string
 from django.utils import timezone, translation
 from django.utils.translation import gettext_lazy as _
 
-from django.contrib.auth.models import User, AnonymousUser
+from django.contrib.auth.models import AnonymousUser
+from django.contrib.auth import get_user_model
+User = get_user_model()
+
 from django.contrib.sites.models import Site
 
 import pytz

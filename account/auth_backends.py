@@ -3,7 +3,8 @@ from __future__ import unicode_literals
 from django.db.models import Q
 
 from django.contrib.auth.backends import ModelBackend
-from django.contrib.auth.models import User
+from django.contrib.auth import get_user_model
+User = get_user_model()
 
 from account.models import EmailAddress
 

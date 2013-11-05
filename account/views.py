@@ -11,7 +11,8 @@ from django.views.generic.base import TemplateResponseMixin, View
 from django.views.generic.edit import FormView
 
 from django.contrib import auth, messages
-from django.contrib.auth.models import User
+from django.contrib.auth import get_user_model
+User = get_user_model()
 from django.contrib.sites.models import get_current_site
 from django.contrib.auth.tokens import default_token_generator
 
