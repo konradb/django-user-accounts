@@ -198,7 +198,8 @@ class SignupCode(models.Model):
         """
         result = SignupCodeResult()
         result.signup_code = self
-        result.user = user
+        if (!settings.ANNONYMIZE_SIGNUP):
+            result.user = user
         result.save()
         signup_code_used.send(sender=result.__class__, signup_code_result=result)
 
@@ -227,7 +228,7 @@ class SignupCode(models.Model):
 class SignupCodeResult(models.Model):
 
     signup_code = models.ForeignKey(SignupCode)
-    user = models.ForeignKey(User)
+    user = models.ForeignKey(User, null = True)
     timestamp = models.DateTimeField(default=timezone.now)
 
     def save(self, **kwargs):
