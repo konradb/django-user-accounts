@@ -198,7 +198,7 @@ class SignupCode(models.Model):
         """
         result = SignupCodeResult()
         result.signup_code = self
-        if (!settings.ANNONYMIZE_SIGNUP):
+        if (not settings.ANNONYMIZE_SIGNUP):
             result.user = user
         result.save()
         signup_code_used.send(sender=result.__class__, signup_code_result=result)
