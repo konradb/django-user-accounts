@@ -28,7 +28,8 @@ from account.fields import TimeZoneField
 from account.managers import EmailAddressManager, EmailConfirmationManager
 from account.signals import signup_code_sent, signup_code_used
 from account.utils import random_token
-
+from south.modelsinspector import add_introspection_rules
+add_introspection_rules([], ["^account\.fields\.TimeZoneField"])
 
 class Account(models.Model):
 
