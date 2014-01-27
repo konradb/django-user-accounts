@@ -219,6 +219,7 @@ class SignupCode(models.Model):
             "signup_url": signup_url,
         }
         subject = render_to_string("account/email/invite_user_subject.txt", ctx)
+        subject = "".join(subject.splitlines()) # remove superfluous line breaks
         message = render_to_string("account/email/invite_user.txt", ctx)
         send_mail(subject, message, settings.DEFAULT_FROM_EMAIL, [self.email])
         self.sent = timezone.now()
