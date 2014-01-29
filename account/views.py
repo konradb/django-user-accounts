@@ -24,7 +24,8 @@ from account.forms import SettingsForm
 from account.mixins import LoginRequiredMixin
 from account.models import SignupCode, EmailAddress, EmailConfirmation, Account, AccountDeletion
 from account.utils import default_redirect, user_display
-
+from django.views.decorators.csrf import csrf_exempt
+from django.utils.decorators import method_decorator
 
 class SignupView(FormView):
 
@@ -47,6 +48,10 @@ class SignupView(FormView):
             "text": _("The code {code} is invalid.")
         }
     }
+
+    @method_decorator(csrf_exempt)
+    def dispatch(self, *args, **kwargs):
+        return super(SignupView, self).dispatch(*args, **kwargs)
 
     def __init__(self, *args, **kwargs):
         self.created_user = None
