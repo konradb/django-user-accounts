@@ -41,7 +41,8 @@ class SignupView(FormView):
     messages = {
         "email_confirmation_sent": {
             "level": messages.INFO,
-            "text": _("Confirmation email sent to {email}.")
+            #"text": _("Confirmation email sent to {email}.")
+            "text": _("Your account has been created. You can log in the app now.")
         },
         "invalid_signup_code": {
             "level": messages.WARNING,
