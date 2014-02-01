@@ -25,6 +25,7 @@ class SignupForm(forms.Form):
         required=True
     )
     password = forms.CharField(
+        min_length=6,
         label=_("Password"),
         widget=forms.PasswordInput(render_value=False)
     )
@@ -42,10 +43,22 @@ class SignupForm(forms.Form):
     def clean_username(self):
         if not alnum_re.search(self.cleaned_data["username"]):
             raise forms.ValidationError(_("Usernames can only contain letters, numbers and underscores."))
+        try:
+            self.cleaned_data['username'].decode('ascii')
+        except UnicodeDecodeError:
+            raise forms.ValidationError(_("Usernames can only contain letters from english alphabet, numbers and underscores."))
         qs = User.objects.filter(username__iexact=self.cleaned_data["username"])
         if not qs.exists():
             return self.cleaned_data["username"]
         raise forms.ValidationError(_("This username is already taken. Please choose another."))
+
+    def clean_password(self):
+        if not alnum_re.search(self.cleaned_data["password"]):
+            raise forms.ValidationError(_("Passwords can only contain letters, numbers and underscores."))
+        try:
+            self.cleaned_data['password'].decode('ascii')
+        except UnicodeDecodeError:
+            raise forms.ValidationError(_("Passwords can only contain letters from english alphabet, numbers and underscores."))
 
     def clean_email(self):
         value = self.cleaned_data["email"]
@@ -138,6 +151,14 @@ class ChangePasswordForm(forms.Form):
         if not self.user.check_password(self.cleaned_data.get("password_current")):
             raise forms.ValidationError(_("Please type your current password."))
         return self.cleaned_data["password_current"]
+
+    def clean_password_new(self)
+        if not alnum_re.search(self.cleaned_data["password_new"]):
+            raise forms.ValidationError(_("Passwords can only contain letters, numbers and underscores."))
+        try:
+            self.cleaned_data['password_new'].decode('ascii')
+        except UnicodeDecodeError:
+            raise forms.ValidationError(_("Passwords can only contain letters from english alphabet, numbers and underscores."))
 
     def clean_password_new_confirm(self):
         if "password_new" in self.cleaned_data and "password_new_confirm" in self.cleaned_data:
