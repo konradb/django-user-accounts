@@ -1,10 +1,8 @@
 from __future__ import unicode_literals
 
 from django.http import Http404, HttpResponseForbidden
-from django.core.mail import send_mail
 from django.shortcuts import redirect, get_object_or_404
 from django.utils.http import base36_to_int, int_to_base36
-from django.template.loader import render_to_string
 from django.core.urlresolvers import reverse
 from django.utils.translation import ugettext_lazy as _
 from django.views.generic.base import TemplateResponseMixin, View
@@ -17,10 +15,12 @@ from django.contrib.sites.models import get_current_site
 from django.contrib.auth.tokens import default_token_generator
 
 from account import signals
+from account.compat import get_user_model
 from account.conf import settings
 from account.forms import SignupForm, LoginUsernameForm
 from account.forms import ChangePasswordForm, PasswordResetForm, PasswordResetTokenForm
 from account.forms import SettingsForm
+from account.hooks import hookset
 from account.mixins import LoginRequiredMixin
 from account.models import SignupCode, EmailAddress, EmailConfirmation, Account, AccountDeletion
 from account.utils import default_redirect, user_display
@@ -38,6 +38,7 @@ class SignupView(FormView):
     form_class = SignupForm
     form_kwargs = {}
     redirect_field_name = "next"
+    identifier_field = "username"
     messages = {
         "email_confirmation_sent": {
             "level": messages.INFO,
@@ -90,7 +91,7 @@ class SignupView(FormView):
         redirect_field_name = self.get_redirect_field_name()
         ctx.update({
             "redirect_field_name": redirect_field_name,
-            "redirect_field_value": self.request.REQUEST.get(redirect_field_name),
+            "redirect_field_value": self.request.REQUEST.get(redirect_field_name, ""),
         })
         return ctx
 
@@ -121,7 +122,7 @@ class SignupView(FormView):
         self.create_account(form)
         self.after_signup(form)
         if settings.ACCOUNT_EMAIL_CONFIRMATION_EMAIL and not email_address.verified:
-            email_address.send_confirmation()
+            self.send_email_confirmation(email_address)
         if settings.ACCOUNT_EMAIL_CONFIRMATION_REQUIRED and not email_address.verified:
             return self.email_confirmation_required_response()
         else:
@@ -138,6 +139,10 @@ class SignupView(FormView):
                         "email": form.cleaned_data["email"]
                     })
                 )
+            # attach form to self to maintain compatibility with login_user
+            # API. this should only be relied on by d-u-a and it is not a stable
+            # API for site developers.
+            self.form = form
             self.login_user()
         return redirect(self.get_success_url())
 
@@ -151,7 +156,7 @@ class SignupView(FormView):
         return self.redirect_field_name
 
     def create_user(self, form, commit=True, **kwargs):
-        user = User(**kwargs)
+        user = get_user_model()(**kwargs)
         username = form.cleaned_data.get("username")
         if username is None:
             username = self.generate_username(form)
@@ -181,20 +186,34 @@ class SignupView(FormView):
             kwargs["verified"] = self.signup_code.email and self.created_user.email == self.signup_code.email
         return EmailAddress.objects.add_email(self.created_user, self.created_user.email, **kwargs)
 
+    def send_email_confirmation(self, email_address):
+        email_address.send_confirmation(site=get_current_site(self.request))
+
     def after_signup(self, form):
         signals.user_signed_up.send(sender=SignupForm, user=self.created_user, form=form)
 
     def login_user(self):
-        # set backend on User object to bypass needing to call auth.authenticate
-        self.created_user.backend = "django.contrib.auth.backends.ModelBackend"
-        auth.login(self.request, self.created_user)
+        user = self.created_user
+        if settings.ACCOUNT_USE_AUTH_AUTHENTICATE:
+            # call auth.authenticate to ensure we set the correct backend for
+            # future look ups using auth.get_user().
+            user = auth.authenticate(**self.user_credentials())
+        else:
+            # set auth backend to ModelBackend, but this may not be used by
+            # everyone. this code path is deprecated and will be removed in
+            # favor of using auth.authenticate above.
+            user.backend = "django.contrib.auth.backends.ModelBackend"
+        auth.login(self.request, user)
         self.request.session.set_expiry(0)
+
+    def user_credentials(self):
+        return hookset.get_user_credentials(self.form, self.identifier_field)
 
     def is_open(self):
         code = self.request.REQUEST.get("code")
         if code:
             try:
-                self.signup_code = SignupCode.check(code)
+                self.signup_code = SignupCode.check_code(code)
             except SignupCode.InvalidCode:
                 if self.messages.get("invalid_signup_code"):
                     messages.add_message(
@@ -261,7 +280,7 @@ class LoginView(FormView):
         redirect_field_name = self.get_redirect_field_name()
         ctx.update({
             "redirect_field_name": redirect_field_name,
-            "redirect_field_value": self.request.REQUEST.get(redirect_field_name),
+            "redirect_field_value": self.request.REQUEST.get(redirect_field_name, ""),
         })
         return ctx
 
@@ -322,7 +341,7 @@ class LogoutView(TemplateResponseMixin, View):
         redirect_field_name = self.get_redirect_field_name()
         ctx.update({
             "redirect_field_name": redirect_field_name,
-            "redirect_field_value": self.request.REQUEST.get(redirect_field_name),
+            "redirect_field_value": self.request.REQUEST.get(redirect_field_name, ""),
         })
         return ctx
 
@@ -338,6 +357,7 @@ class LogoutView(TemplateResponseMixin, View):
 
 class ConfirmEmailView(TemplateResponseMixin, View):
 
+    http_method_names = ["get", "post"]
     messages = {
         "email_confirmed": {
             "level": messages.SUCCESS,
@@ -467,7 +487,7 @@ class ChangePasswordView(FormView):
         redirect_field_name = self.get_redirect_field_name()
         ctx.update({
             "redirect_field_name": redirect_field_name,
-            "redirect_field_value": self.request.REQUEST.get(redirect_field_name),
+            "redirect_field_value": self.request.REQUEST.get(redirect_field_name, ""),
         })
         return ctx
 
@@ -488,10 +508,7 @@ class ChangePasswordView(FormView):
             "protocol": protocol,
             "current_site": current_site,
         }
-        subject = render_to_string("account/email/password_change_subject.txt", ctx)
-        subject = "".join(subject.splitlines())
-        message = render_to_string("account/email/password_change.txt", ctx)
-        send_mail(subject, message, settings.DEFAULT_FROM_EMAIL, [user.email])
+        hookset.send_password_change_email([user.email], ctx)
 
 
 class PasswordResetView(FormView):
@@ -517,9 +534,11 @@ class PasswordResetView(FormView):
         return self.response_class(**response_kwargs)
 
     def send_email(self, email):
+        User = get_user_model()
         protocol = getattr(settings, "DEFAULT_HTTP_PROTOCOL", "http")
         current_site = get_current_site(self.request)
-        for user in User.objects.filter(email__iexact=email):
+        email_qs = EmailAddress.objects.filter(email__iexact=email)
+        for user in User.objects.filter(pk__in=email_qs.values("user")):
             uid = int_to_base36(user.id)
             token = self.make_token(user)
             password_reset_url = "{0}://{1}{2}".format(
@@ -532,10 +551,7 @@ class PasswordResetView(FormView):
                 "current_site": current_site,
                 "password_reset_url": password_reset_url,
             }
-            subject = render_to_string("account/email/password_reset_subject.txt", ctx)
-            subject = "".join(subject.splitlines())
-            message = render_to_string("account/email/password_reset.txt", ctx)
-            send_mail(subject, message, settings.DEFAULT_FROM_EMAIL, [user.email])
+            hookset.send_password_reset_email([user.email], ctx)
 
     def make_token(self, user):
         return self.token_generator.make_token(user)
@@ -570,7 +586,7 @@ class PasswordResetTokenView(FormView):
             "uidb36": self.kwargs["uidb36"],
             "token": self.kwargs["token"],
             "redirect_field_name": redirect_field_name,
-            "redirect_field_value": self.request.REQUEST.get(redirect_field_name),
+            "redirect_field_value": self.request.REQUEST.get(redirect_field_name, ""),
         })
         return ctx
 
@@ -608,7 +624,7 @@ class PasswordResetTokenView(FormView):
             uid_int = base36_to_int(self.kwargs["uidb36"])
         except ValueError:
             raise Http404()
-        return get_object_or_404(User, id=uid_int)
+        return get_object_or_404(get_user_model(), id=uid_int)
 
     def check_token(self, user, token):
         return self.token_generator.check_token(user, token)
@@ -682,7 +698,7 @@ class SettingsView(LoginRequiredMixin, FormView):
         redirect_field_name = self.get_redirect_field_name()
         ctx.update({
             "redirect_field_name": redirect_field_name,
-            "redirect_field_value": self.request.REQUEST.get(redirect_field_name),
+            "redirect_field_value": self.request.REQUEST.get(redirect_field_name, ""),
         })
         return ctx
 

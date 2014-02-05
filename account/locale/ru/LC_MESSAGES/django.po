@@ -3,6 +3,7 @@
 # This file is distributed under the same license as the PACKAGE package.
 # 
 # Translators:
+# Eugene MechanisM <contact@mechanism.name>, 2012
 msgid ""
 msgstr ""
 "Project-Id-Version: django-user-accounts\n"
@@ -10,24 +11,24 @@ msgstr ""
 "POT-Creation-Date: 2014-01-14 12:08-0700\n"
 "PO-Revision-Date: 2014-01-14 19:10+0000\n"
 "Last-Translator: Brian Rosner <brosner@gmail.com>\n"
-"Language-Team: Italian (http://www.transifex.com/projects/p/pinax/language/it/)\n"
+"Language-Team: Russian (http://www.transifex.com/projects/p/pinax/language/ru/)\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-"Language: it\n"
-"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+"Language: ru\n"
+"Plural-Forms: nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);\n"
 
 #: forms.py:26 forms.py:109
 msgid "Username"
-msgstr "Nome utente"
+msgstr "Имя пользователя"
 
 #: forms.py:32 forms.py:78
 msgid "Password"
-msgstr "Password"
+msgstr "Пароль"
 
 #: forms.py:36
 msgid "Password (again)"
-msgstr "Password (di nuovo)"
+msgstr "Пароль(еще раз)"
 
 #: forms.py:40 forms.py:124 forms.py:170 forms.py:199
 msgid "Email"
@@ -35,51 +36,51 @@ msgstr "Email"
 
 #: forms.py:51
 msgid "Usernames can only contain letters, numbers and underscores."
-msgstr "Il nome utente può contenere solo lettere, numeri e trattini bassi."
+msgstr "Имена пользователей могут состоять только из букв, цифер и подчеркиваний."
 
 #: forms.py:59
 msgid "This username is already taken. Please choose another."
-msgstr "Questo nome utente è già utilizzato. Scegline un'altro."
+msgstr "Это имя пользователя уже занято. Пожалуйста, выберите другое."
 
 #: forms.py:66 forms.py:219
 msgid "A user is registered with this email address."
-msgstr "Esiste già un utente con questo indirizzo email."
+msgstr "Пользователь зарегистрирован с этим email адресом."
 
 #: forms.py:71 forms.py:164 forms.py:193
 msgid "You must type the same password each time."
-msgstr "La password deve essere inserita due volte."
+msgstr "Вы должны писать одинаковый пароль каждый раз."
 
 #: forms.py:82
 msgid "Remember Me"
-msgstr "Ricordami"
+msgstr "Запомнить Меня"
 
 #: forms.py:95
 msgid "This account is inactive."
-msgstr "Questo account non è attivo."
+msgstr "Этот аккаунт неактивен."
 
 #: forms.py:110
 msgid "The username and/or password you specified are not correct."
-msgstr "Il nome utente e/o la password non sono corretti."
+msgstr "Имя пользователя и/или пароль введено некорректно."
 
 #: forms.py:125
 msgid "The email address and/or password you specified are not correct."
-msgstr "L'indirizzo email e/o la password non sono corretti."
+msgstr "Email-адрес и/или пароль введено некорректно."
 
 #: forms.py:140
 msgid "Current Password"
-msgstr "Password Attuale"
+msgstr "Действующий пароль"
 
 #: forms.py:144 forms.py:182
 msgid "New Password"
-msgstr "Nuova Password"
+msgstr "Новый Пароль"
 
 #: forms.py:148 forms.py:186
 msgid "New Password (again)"
-msgstr "Nuova Password (di nuovo)"
+msgstr "Новый Пароль(еще раз)"
 
 #: forms.py:158
 msgid "Please type your current password."
-msgstr "Inserisci la password attuale."
+msgstr "Пожалуйста, введите ваш действующий пароль."
 
 #: forms.py:175
 msgid "Email address can not be found."
@@ -87,39 +88,39 @@ msgstr ""
 
 #: forms.py:201
 msgid "Timezone"
-msgstr "Fuso orario"
+msgstr "Часовой пояс"
 
 #: forms.py:207
 msgid "Language"
-msgstr "Lingua"
+msgstr "Язык"
 
 #: models.py:31
 msgid "user"
-msgstr "utente"
+msgstr "пользователь"
 
 #: models.py:32
 msgid "timezone"
-msgstr "fuso orario"
+msgstr "часовой пояс"
 
 #: models.py:33
 msgid "language"
-msgstr "lingua"
+msgstr "язык"
 
 #: models.py:247
 msgid "email address"
-msgstr "indirizzo email"
+msgstr "email-адрес"
 
 #: models.py:248
 msgid "email addresses"
-msgstr "indirizzi email"
+msgstr "email-адреса"
 
 #: models.py:297
 msgid "email confirmation"
-msgstr "conferma indirizzo email"
+msgstr "подтверждение email"
 
 #: models.py:298
 msgid "email confirmations"
-msgstr "conferme indirizzi email"
+msgstr "подтверждения email"
 
 #: views.py:41
 #, python-brace-format
@@ -138,11 +139,11 @@ msgstr ""
 
 #: views.py:413 views.py:546
 msgid "Password successfully changed."
-msgstr "Password cambiata con successo."
+msgstr "Пароль успешно изменен"
 
 #: views.py:625
 msgid "Account settings updated."
-msgstr "Configurazione account aggiornata."
+msgstr "Настройки аккаунта изменены."
 
 #: views.py:709
 #, python-brace-format

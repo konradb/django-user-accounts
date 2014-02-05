@@ -14,17 +14,24 @@ setup(
     url="http://github.com/pinax/django-user-accounts",
     packages=find_packages(),
     install_requires=[
-        "django-appconf==0.6",
-        "pytz==2013.7"
+        "django-appconf>=0.6",
+        "pytz>=2013.9"
     ],
+    zip_safe=False,
+    package_data={
+        "account": [
+            "locale/*/LC_MESSAGES/*",
+        ],
+    },
     classifiers=[
-        "Development Status :: 4 - Beta",
+        "Development Status :: 5 - Production/Stable",
         "Environment :: Web Environment",
         "Intended Audience :: Developers",
         "License :: OSI Approved :: MIT License",
         "Operating System :: OS Independent",
         "Programming Language :: Python",
-        "Programming Language :: Python 3",
+        "Programming Language :: Python :: 2",
+        "Programming Language :: Python :: 3",
         "Framework :: Django",
     ]
 )

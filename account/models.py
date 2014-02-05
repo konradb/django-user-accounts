@@ -2,17 +2,18 @@ from __future__ import unicode_literals
 
 import datetime
 import operator
-import urllib
 
-from django.core.mail import send_mail
+try:
+    from urllib.parse import urlencode
+except ImportError: # python 2
+    from urllib import urlencode
+
 from django.core.urlresolvers import reverse
 from django.db import models, transaction
 from django.db.models import Q
 from django.db.models.signals import post_save
-from django.dispatch import receiver
-from django.template.loader import render_to_string
-from django.utils import timezone, translation
-from django.utils.translation import gettext_lazy as _
+from django.utils import timezone, translation, six
+from django.utils.translation import ugettext_lazy as _
 
 from django.contrib.auth.models import AnonymousUser
 from django.contrib.auth import get_user_model
@@ -23,17 +24,20 @@ from django.contrib.sites.models import Site
 import pytz
 
 from account import signals
+from account.compat import AUTH_USER_MODEL, receiver
 from account.conf import settings
 from account.fields import TimeZoneField
+from account.hooks import hookset
 from account.managers import EmailAddressManager, EmailConfirmationManager
 from account.signals import signup_code_sent, signup_code_used
 from account.utils import random_token
 from south.modelsinspector import add_introspection_rules
 add_introspection_rules([], ["^account\.fields\.TimeZoneField"])
 
+
 class Account(models.Model):
 
-    user = models.OneToOneField(User, related_name="account", verbose_name=_("user"))
+    user = models.OneToOneField(AUTH_USER_MODEL, related_name="account", verbose_name=_("user"))
     timezone = TimeZoneField(_("timezone"))
     language = models.CharField(_("language"),
         max_length=10,
@@ -70,8 +74,8 @@ class Account(models.Model):
             EmailAddress.objects.add_email(account.user, account.user.email, **kwargs)
         return account
 
-    def __unicode__(self):
-        return self.user.username
+    def __str__(self):
+        return str(self.user)
 
     def now(self):
         """
@@ -92,7 +96,7 @@ class Account(models.Model):
         return value.astimezone(pytz.timezone(timezone))
 
 
-@receiver(post_save, sender=User)
+@receiver(post_save, sender=AUTH_USER_MODEL)
 def user_post_save(sender, **kwargs):
     """
     After User.save is called we check to see if it was a created user. If so,
@@ -133,7 +137,7 @@ class SignupCode(models.Model):
     code = models.CharField(max_length=64, unique=True)
     max_uses = models.PositiveIntegerField(default=0)
     expiry = models.DateTimeField(null=True, blank=True)
-    inviter = models.ForeignKey(User, null=True, blank=True)
+    inviter = models.ForeignKey(AUTH_USER_MODEL, null=True, blank=True)
     email = models.EmailField(blank=True)
     notes = models.TextField(blank=True)
     sent = models.DateTimeField(null=True, blank=True)
@@ -153,7 +157,7 @@ class SignupCode(models.Model):
             checks.append(Q(code=code))
         if email:
             checks.append(Q(email=code))
-        return cls._default_manager.filter(reduce(operator.or_, checks)).exists()
+        return cls._default_manager.filter(six.moves.reduce(operator.or_, checks)).exists()
 
     @classmethod
     def create(cls, **kwargs):
@@ -162,7 +166,7 @@ class SignupCode(models.Model):
             raise cls.AlreadyExists()
         expiry = timezone.now() + datetime.timedelta(hours=kwargs.get("expiry", 24))
         if not code:
-            code = random_token([email]) if email else random_token()
+            code = hookset.generate_signup_code_token(email)
         params = {
             "code": code,
             "max_uses": kwargs.get("max_uses", 0),
@@ -175,7 +179,7 @@ class SignupCode(models.Model):
         return cls(**params)
 
     @classmethod
-    def check(cls, code):
+    def check_code(cls, code):
         try:
             signup_code = cls._default_manager.get(code=code)
         except cls.DoesNotExist:
@@ -211,17 +215,14 @@ class SignupCode(models.Model):
             protocol,
             current_site.domain,
             reverse("account_signup"),
-            urllib.urlencode({"code": self.code})
+            urlencode({"code": self.code})
         )
         ctx = {
             "signup_code": self,
             "current_site": current_site,
             "signup_url": signup_url,
         }
-        subject = render_to_string("account/email/invite_user_subject.txt", ctx)
-        subject = "".join(subject.splitlines()) # remove superfluous line breaks
-        message = render_to_string("account/email/invite_user.txt", ctx)
-        send_mail(subject, message, settings.DEFAULT_FROM_EMAIL, [self.email])
+        hookset.send_invitation_email([self.email], ctx)
         self.sent = timezone.now()
         self.save()
         signup_code_sent.send(sender=SignupCode, signup_code=self)
@@ -240,7 +241,7 @@ class SignupCodeResult(models.Model):
 
 class EmailAddress(models.Model):
 
-    user = models.ForeignKey(User)
+    user = models.ForeignKey(AUTH_USER_MODEL)
     email = models.EmailField(unique=settings.ACCOUNT_EMAIL_UNIQUE)
     verified = models.BooleanField(default=False)
     primary = models.BooleanField(default=False)
@@ -269,9 +270,9 @@ class EmailAddress(models.Model):
         self.user.save()
         return True
 
-    def send_confirmation(self):
+    def send_confirmation(self, **kwargs):
         confirmation = EmailConfirmation.create(self)
-        confirmation.send()
+        confirmation.send(**kwargs)
         return confirmation
 
     def change(self, new_email, confirm=True):
@@ -306,7 +307,7 @@ class EmailConfirmation(models.Model):
 
     @classmethod
     def create(cls, email_address):
-        key = random_token([email_address.email])
+        key = hookset.generate_email_confirmation_token(email_address.email)
         return cls._default_manager.create(email_address=email_address, key=key)
 
     def key_expired(self):
@@ -338,10 +339,7 @@ class EmailConfirmation(models.Model):
             "current_site": current_site,
             "key": self.key,
         }
-        subject = render_to_string("account/email/email_confirmation_subject.txt", ctx)
-        subject = "".join(subject.splitlines()) # remove superfluous line breaks
-        message = render_to_string("account/email/email_confirmation_message.txt", ctx)
-        send_mail(subject, message, settings.DEFAULT_FROM_EMAIL, [self.email_address.email])
+        hookset.send_confirmation_email([self.email_address.email], ctx)
         self.sent = timezone.now()
         self.save()
         signals.email_confirmation_sent.send(sender=self.__class__, confirmation=self)
@@ -349,7 +347,7 @@ class EmailConfirmation(models.Model):
 
 class AccountDeletion(models.Model):
 
-    user = models.ForeignKey(User, null=True, blank=True, on_delete=models.SET_NULL)
+    user = models.ForeignKey(AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL)
     email = models.EmailField()
     date_requested = models.DateTimeField(default=timezone.now)
     date_expunged = models.DateTimeField(null=True, blank=True)
