@@ -178,7 +178,7 @@ class ChangePasswordForm(forms.Form):
             raise forms.ValidationError(_("Please type your current password."))
         return self.cleaned_data["password_current"]
 
-    def clean_password_new(self)
+    def clean_password_new(self):
         if not alnum_re.search(self.cleaned_data["password_new"]):
             raise forms.ValidationError(_("Passwords can only contain letters, numbers and underscores."))
         try:
