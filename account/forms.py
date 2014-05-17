@@ -78,6 +78,7 @@ class SignupForm(forms.Form):
             raise forms.ValidationError(_("Passwords can only contain letters, numbers and underscores."))
         try:
             self.cleaned_data['password'].decode('ascii')
+            return self.cleaned_data['password']
         except UnicodeDecodeError:
             raise forms.ValidationError(_("Passwords can only contain letters from english alphabet, numbers and underscores."))
 
