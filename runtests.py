@@ -1,38 +1,85 @@
+#!/usr/bin/env python
 import os
 import sys
+
+import django
 
 from django.conf import settings
 
 
-settings.configure(
+DEFAULT_SETTINGS = dict(
     DEBUG=True,
     USE_TZ=True,
-    DATABASES={
-        "default": {
-            "ENGINE": "django.db.backends.sqlite3",
-        }
-    },
-    ROOT_URLCONF="account.urls",
     INSTALLED_APPS=[
         "django.contrib.auth",
         "django.contrib.contenttypes",
+        "django.contrib.sessions",
         "django.contrib.sites",
         "django.contrib.messages",
         "account",
+        "account.tests",
     ],
     MIDDLEWARE_CLASSES=[
+        "django.contrib.sessions.middleware.SessionMiddleware",
+        "django.contrib.auth.middleware.AuthenticationMiddleware",
+        "django.contrib.auth.middleware.SessionAuthenticationMiddleware",
         "django.contrib.messages.middleware.MessageMiddleware",
     ],
+    DATABASES={
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": ":memory:",
+        }
+    },
     SITE_ID=1,
-    TEMPLATE_DIRS=[
-        os.path.abspath(os.path.join(os.path.dirname(__file__), "account", "tests", "templates")),
+    ROOT_URLCONF="account.tests.urls",
+    SECRET_KEY="notasecret",
+    TEMPLATES=[
+        {
+            'BACKEND': 'django.template.backends.django.DjangoTemplates',
+            'DIRS': [
+                # insert your TEMPLATE_DIRS here
+            ],
+            'APP_DIRS': True,
+            'OPTIONS': {
+                'context_processors': [
+                    # Insert your TEMPLATE_CONTEXT_PROCESSORS here or use this
+                    # list if you haven't customized them:
+                    'django.contrib.auth.context_processors.auth',
+                    'django.template.context_processors.debug',
+                    'django.template.context_processors.i18n',
+                    'django.template.context_processors.media',
+                    'django.template.context_processors.static',
+                    'django.template.context_processors.tz',
+                    'django.contrib.messages.context_processors.messages',
+                ],
+            },
+        },
     ]
 )
 
-from django_nose import NoseTestSuiteRunner
 
-test_runner = NoseTestSuiteRunner(verbosity=1)
-failures = test_runner.run_tests(["account"])
+def runtests(*test_args):
+    if not settings.configured:
+        settings.configure(**DEFAULT_SETTINGS)
 
-if failures:
+    django.setup()
+
+    parent = os.path.dirname(os.path.abspath(__file__))
+    sys.path.insert(0, parent)
+
+    try:
+        from django.test.runner import DiscoverRunner
+        runner_class = DiscoverRunner
+        test_args = ["account.tests"]
+    except ImportError:
+        from django.test.simple import DjangoTestSuiteRunner
+        runner_class = DjangoTestSuiteRunner
+        test_args = ["tests"]
+
+    failures = runner_class(verbosity=1, interactive=True, failfast=False).run_tests(test_args)
     sys.exit(failures)
+
+
+if __name__ == "__main__":
+    runtests(*sys.argv[1:])

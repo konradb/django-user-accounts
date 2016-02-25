@@ -5,14 +5,16 @@ import operator
 
 try:
     from urllib.parse import urlencode
-except ImportError: # python 2
+except ImportError:  # python 2
     from urllib import urlencode
 
 from django.core.urlresolvers import reverse
 from django.db import models, transaction
 from django.db.models import Q
 from django.db.models.signals import post_save
+from django.dispatch import receiver
 from django.utils import timezone, translation, six
+from django.utils.encoding import python_2_unicode_compatible
 from django.utils.translation import ugettext_lazy as _
 
 from django.contrib.auth.models import AnonymousUser
@@ -24,7 +26,6 @@ from django.contrib.sites.models import Site
 import pytz
 
 from account import signals
-from account.compat import AUTH_USER_MODEL, receiver
 from account.conf import settings
 from account.fields import TimeZoneField
 from account.hooks import hookset
@@ -34,11 +35,13 @@ from south.modelsinspector import add_introspection_rules
 add_introspection_rules([], ["^account\.fields\.TimeZoneField"])
 
 
+@python_2_unicode_compatible
 class Account(models.Model):
 
-    user = models.OneToOneField(AUTH_USER_MODEL, related_name="account", verbose_name=_("user"))
+    user = models.OneToOneField(settings.AUTH_USER_MODEL, related_name="account", verbose_name=_("user"))
     timezone = TimeZoneField(_("timezone"))
-    language = models.CharField(_("language"),
+    language = models.CharField(
+        _("language"),
         max_length=10,
         choices=settings.ACCOUNT_LANGUAGES,
         default=settings.LANGUAGE_CODE
@@ -46,14 +49,13 @@ class Account(models.Model):
 
     @classmethod
     def for_request(cls, request):
-        if request.user.is_authenticated():
+        user = getattr(request, "user", None)
+        if user and user.is_authenticated():
             try:
-                account = Account._default_manager.get(user=request.user)
+                return Account._default_manager.get(user=user)
             except Account.DoesNotExist:
-                account = AnonymousAccount(request)
-        else:
-            account = AnonymousAccount(request)
-        return account
+                pass
+        return AnonymousAccount(request)
 
     @classmethod
     def create(cls, request=None, **kwargs):
@@ -95,13 +97,13 @@ class Account(models.Model):
         return value.astimezone(pytz.timezone(timezone))
 
 
-@receiver(post_save, sender=AUTH_USER_MODEL)
+@receiver(post_save, sender=settings.AUTH_USER_MODEL)
 def user_post_save(sender, **kwargs):
     """
     After User.save is called we check to see if it was a created user. If so,
     we check if the User object wants account creation. If all passes we
     create an Account object.
-    
+
     We only run on user creation to avoid having to check for existence on
     each call to User.save.
     """
@@ -111,6 +113,7 @@ def user_post_save(sender, **kwargs):
         Account.create(user=user)
 
 
+@python_2_unicode_compatible
 class AnonymousAccount(object):
 
     def __init__(self, request=None):
@@ -121,10 +124,11 @@ class AnonymousAccount(object):
         else:
             self.language = translation.get_language_from_request(request, check_path=True)
 
-    def __unicode__(self):
+    def __str__(self):
         return "AnonymousAccount"
 
 
+@python_2_unicode_compatible
 class SignupCode(models.Model):
 
     class AlreadyExists(Exception):
@@ -133,17 +137,21 @@ class SignupCode(models.Model):
     class InvalidCode(Exception):
         pass
 
-    code = models.CharField(max_length=64, unique=True)
-    max_uses = models.PositiveIntegerField(default=0)
-    expiry = models.DateTimeField(null=True, blank=True)
-    inviter = models.ForeignKey(AUTH_USER_MODEL, null=True, blank=True)
-    email = models.EmailField(blank=True)
-    notes = models.TextField(blank=True)
-    sent = models.DateTimeField(null=True, blank=True)
-    created = models.DateTimeField(default=timezone.now, editable=False)
-    use_count = models.PositiveIntegerField(editable=False, default=0)
+    code = models.CharField(_("code"), max_length=64, unique=True)
+    max_uses = models.PositiveIntegerField(_("max uses"), default=0)
+    expiry = models.DateTimeField(_("expiry"), null=True, blank=True)
+    inviter = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True)
+    email = models.EmailField(max_length=254, blank=True)
+    notes = models.TextField(_("notes"), blank=True)
+    sent = models.DateTimeField(_("sent"), null=True, blank=True)
+    created = models.DateTimeField(_("created"), default=timezone.now, editable=False)
+    use_count = models.PositiveIntegerField(_("use count"), editable=False, default=0)
 
-    def __unicode__(self):
+    class Meta:
+        verbose_name = _("signup code")
+        verbose_name_plural = _("signup codes")
+
+    def __str__(self):
         if self.email:
             return "{0} [{1}]".format(self.email, self.code)
         else:
@@ -156,6 +164,8 @@ class SignupCode(models.Model):
             checks.append(Q(code=code))
         if email:
             checks.append(Q(email=code))
+        if not checks:
+            return False
         return cls._default_manager.filter(six.moves.reduce(operator.or_, checks)).exists()
 
     @classmethod
@@ -210,17 +220,21 @@ class SignupCode(models.Model):
     def send(self, **kwargs):
         protocol = getattr(settings, "DEFAULT_HTTP_PROTOCOL", "http")
         current_site = kwargs["site"] if "site" in kwargs else Site.objects.get_current()
-        signup_url = "{0}://{1}{2}?{3}".format(
-            protocol,
-            current_site.domain,
-            reverse("account_signup"),
-            urlencode({"code": self.code})
-        )
+        if "signup_url" not in kwargs:
+            signup_url = "{0}://{1}{2}?{3}".format(
+                protocol,
+                current_site.domain,
+                reverse("account_signup"),
+                urlencode({"code": self.code})
+            )
+        else:
+            signup_url = kwargs["signup_url"]
         ctx = {
             "signup_code": self,
             "current_site": current_site,
             "signup_url": signup_url,
         }
+        ctx.update(kwargs.get("extra_ctx", {}))
         hookset.send_invitation_email([self.email], ctx)
         self.sent = timezone.now()
         self.save()
@@ -230,7 +244,7 @@ class SignupCode(models.Model):
 class SignupCodeResult(models.Model):
 
     signup_code = models.ForeignKey(SignupCode)
-    user = models.ForeignKey(User, null = True)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL)
     timestamp = models.DateTimeField(default=timezone.now)
 
     def save(self, **kwargs):
@@ -238,12 +252,13 @@ class SignupCodeResult(models.Model):
         self.signup_code.calculate_use_count()
 
 
+@python_2_unicode_compatible
 class EmailAddress(models.Model):
 
-    user = models.ForeignKey(AUTH_USER_MODEL)
-    email = models.EmailField(unique=settings.ACCOUNT_EMAIL_UNIQUE)
-    verified = models.BooleanField(default=False)
-    primary = models.BooleanField(default=False)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL)
+    email = models.EmailField(max_length=254, unique=settings.ACCOUNT_EMAIL_UNIQUE)
+    verified = models.BooleanField(_("verified"), default=False)
+    primary = models.BooleanField(_("primary"), default=False)
 
     objects = EmailAddressManager()
 
@@ -253,7 +268,7 @@ class EmailAddress(models.Model):
         if not settings.ACCOUNT_EMAIL_UNIQUE:
             unique_together = [("user", "email")]
 
-    def __unicode__(self):
+    def __str__(self):
         return "{0} ({1})".format(self.email, self.user)
 
     def set_as_primary(self, conditional=False):
@@ -278,7 +293,7 @@ class EmailAddress(models.Model):
         """
         Given a new email address, change self and re-confirm.
         """
-        with transaction.commit_on_success():
+        with transaction.atomic():
             self.user.email = new_email
             self.user.save()
             self.email = new_email
@@ -288,10 +303,11 @@ class EmailAddress(models.Model):
                 self.send_confirmation()
 
 
+@python_2_unicode_compatible
 class EmailConfirmation(models.Model):
 
     email_address = models.ForeignKey(EmailAddress)
-    created = models.DateTimeField(default=timezone.now())
+    created = models.DateTimeField(default=timezone.now)
     sent = models.DateTimeField(null=True)
     key = models.CharField(max_length=64, unique=True)
 
@@ -301,7 +317,7 @@ class EmailConfirmation(models.Model):
         verbose_name = _("email confirmation")
         verbose_name_plural = _("email confirmations")
 
-    def __unicode__(self):
+    def __str__(self):
         return "confirmation for {0}".format(self.email_address)
 
     @classmethod
@@ -329,7 +345,7 @@ class EmailConfirmation(models.Model):
         activate_url = "{0}://{1}{2}".format(
             protocol,
             current_site.domain,
-            reverse("account_confirm_email", args=[self.key])
+            reverse(settings.ACCOUNT_EMAIL_CONFIRMATION_URL, args=[self.key])
         )
         ctx = {
             "email_address": self.email_address,
@@ -346,10 +362,14 @@ class EmailConfirmation(models.Model):
 
 class AccountDeletion(models.Model):
 
-    user = models.ForeignKey(AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL)
-    email = models.EmailField()
-    date_requested = models.DateTimeField(default=timezone.now)
-    date_expunged = models.DateTimeField(null=True, blank=True)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL)
+    email = models.EmailField(max_length=254)
+    date_requested = models.DateTimeField(_("date requested"), default=timezone.now)
+    date_expunged = models.DateTimeField(_("date expunged"), null=True, blank=True)
+
+    class Meta:
+        verbose_name = _("account deletion")
+        verbose_name_plural = _("account deletions")
 
     @classmethod
     def expunge(cls, hours_ago=None):

@@ -10,12 +10,10 @@ from django.views.generic.edit import FormView
 
 from django.contrib import auth, messages
 from django.contrib.auth import get_user_model
-User = get_user_model()
-from django.contrib.sites.models import get_current_site
+from django.contrib.sites.shortcuts import get_current_site
 from django.contrib.auth.tokens import default_token_generator
 
 from account import signals
-from account.compat import get_user_model
 from account.conf import settings
 from account.forms import SignupForm, LoginUsernameForm
 from account.forms import ChangePasswordForm, PasswordResetForm, PasswordResetTokenForm
@@ -23,9 +21,8 @@ from account.forms import SettingsForm
 from account.hooks import hookset
 from account.mixins import LoginRequiredMixin
 from account.models import SignupCode, EmailAddress, EmailConfirmation, Account, AccountDeletion
-from account.utils import default_redirect, user_display
-from django.views.decorators.csrf import csrf_exempt
-from django.utils.decorators import method_decorator
+from account.utils import default_redirect, get_form_data
+
 
 class SignupView(FormView):
 
@@ -60,6 +57,25 @@ class SignupView(FormView):
         kwargs["signup_code"] = None
         super(SignupView, self).__init__(*args, **kwargs)
 
+    def dispatch(self, request, *args, **kwargs):
+        self.request = request
+        self.args = args
+        self.kwargs = kwargs
+        self.setup_signup_code()
+        return super(SignupView, self).dispatch(request, *args, **kwargs)
+
+    def setup_signup_code(self):
+        code = self.get_code()
+        if code:
+            try:
+                self.signup_code = SignupCode.check_code(code)
+            except SignupCode.InvalidCode:
+                self.signup_code = None
+            self.signup_code_present = True
+        else:
+            self.signup_code = None
+            self.signup_code_present = False
+
     def get(self, *args, **kwargs):
         if self.request.user.is_authenticated():
             return redirect(default_redirect(self.request, settings.ACCOUNT_LOGIN_REDIRECT_URL))
@@ -68,6 +84,8 @@ class SignupView(FormView):
         return super(SignupView, self).get(*args, **kwargs)
 
     def post(self, *args, **kwargs):
+        if self.request.user.is_authenticated():
+            raise Http404()
         if not self.is_open():
             return self.closed()
         return super(SignupView, self).post(*args, **kwargs)
@@ -87,11 +105,11 @@ class SignupView(FormView):
             return [self.template_name]
 
     def get_context_data(self, **kwargs):
-        ctx = kwargs
+        ctx = super(SignupView, self).get_context_data(**kwargs)
         redirect_field_name = self.get_redirect_field_name()
         ctx.update({
             "redirect_field_name": redirect_field_name,
-            "redirect_field_value": self.request.REQUEST.get(redirect_field_name, ""),
+            "redirect_field_value": self.request.POST.get(redirect_field_name, self.request.GET.get(redirect_field_name, "")),
         })
         return ctx
 
@@ -103,8 +121,8 @@ class SignupView(FormView):
     def form_invalid(self, form):
         signals.user_sign_up_attempt.send(
             sender=SignupForm,
-            username=form.data.get("username"),
-            email=form.data.get("email"),
+            username=get_form_data(form, self.identifier_field),
+            email=get_form_data(form, "email"),
             result=form.is_valid()
         )
         return super(SignupView, self).form_invalid(form)
@@ -115,6 +133,7 @@ class SignupView(FormView):
         # we want to handle that ourself.
         self.created_user._disable_account_creation = True
         self.created_user.save()
+        self.use_signup_code(self.created_user)
         email_address = self.create_email_address(form)
         if settings.ACCOUNT_EMAIL_CONFIRMATION_REQUIRED and not email_address.verified:
             self.created_user.is_active = False
@@ -155,8 +174,11 @@ class SignupView(FormView):
     def get_redirect_field_name(self):
         return self.redirect_field_name
 
-    def create_user(self, form, commit=True, **kwargs):
-        user = get_user_model()(**kwargs)
+    def create_user(self, form, commit=True, model=None, **kwargs):
+        User = model
+        if User is None:
+            User = get_user_model()
+        user = User(**kwargs)
         username = form.cleaned_data.get("username")
         if username is None:
             username = self.generate_username(form)
@@ -175,16 +197,21 @@ class SignupView(FormView):
         return Account.create(request=self.request, user=self.created_user, create_email=False)
 
     def generate_username(self, form):
-        raise NotImplementedError("Unable to generate username by default. "
-            "Override SignupView.generate_username in a subclass.")
+        raise NotImplementedError(
+            "Unable to generate username by default. "
+            "Override SignupView.generate_username in a subclass."
+        )
 
     def create_email_address(self, form, **kwargs):
         kwargs.setdefault("primary", True)
         kwargs.setdefault("verified", False)
         if self.signup_code:
-            self.signup_code.use(self.created_user)
             kwargs["verified"] = self.signup_code.email and self.created_user.email == self.signup_code.email
         return EmailAddress.objects.add_email(self.created_user, self.created_user.email, **kwargs)
+
+    def use_signup_code(self, user):
+        if self.signup_code:
+            self.signup_code.use(user)
 
     def send_email_confirmation(self, email_address):
         email_address.send_confirmation(site=get_current_site(self.request))
@@ -209,25 +236,23 @@ class SignupView(FormView):
     def user_credentials(self):
         return hookset.get_user_credentials(self.form, self.identifier_field)
 
+    def get_code(self):
+        return self.request.POST.get("code", self.request.GET.get("code"))
+
     def is_open(self):
-        code = self.request.REQUEST.get("code")
-        if code:
-            try:
-                self.signup_code = SignupCode.check_code(code)
-            except SignupCode.InvalidCode:
+        if self.signup_code:
+            return True
+        else:
+            if self.signup_code_present:
                 if self.messages.get("invalid_signup_code"):
                     messages.add_message(
                         self.request,
                         self.messages["invalid_signup_code"]["level"],
                         self.messages["invalid_signup_code"]["text"].format(**{
-                            "code": code
+                            "code": self.get_code(),
                         })
                     )
-                return settings.ACCOUNT_OPEN_SIGNUP
-            else:
-                return True
-        else:
-            return settings.ACCOUNT_OPEN_SIGNUP
+        return settings.ACCOUNT_OPEN_SIGNUP
 
     def email_confirmation_required_response(self):
         if self.request.is_ajax():
@@ -276,11 +301,11 @@ class LoginView(FormView):
             return [self.template_name]
 
     def get_context_data(self, **kwargs):
-        ctx = kwargs
+        ctx = super(LoginView, self).get_context_data(**kwargs)
         redirect_field_name = self.get_redirect_field_name()
         ctx.update({
             "redirect_field_name": redirect_field_name,
-            "redirect_field_value": self.request.REQUEST.get(redirect_field_name, ""),
+            "redirect_field_value": self.request.POST.get(redirect_field_name, self.request.GET.get(redirect_field_name, "")),
         })
         return ctx
 
@@ -292,7 +317,7 @@ class LoginView(FormView):
     def form_invalid(self, form):
         signals.user_login_attempt.send(
             sender=LoginView,
-            username=form.data.get(form.identifier_field),
+            username=get_form_data(form, form.identifier_field),
             result=form.is_valid()
         )
         return super(LoginView, self).form_invalid(form)
@@ -341,7 +366,7 @@ class LogoutView(TemplateResponseMixin, View):
         redirect_field_name = self.get_redirect_field_name()
         ctx.update({
             "redirect_field_name": redirect_field_name,
-            "redirect_field_value": self.request.REQUEST.get(redirect_field_name, ""),
+            "redirect_field_value": self.request.POST.get(redirect_field_name, self.request.GET.get(redirect_field_name, "")),
         })
         return ctx
 
@@ -452,6 +477,9 @@ class ChangePasswordView(FormView):
         user = self.request.user
         user.set_password(form.cleaned_data["password_new"])
         user.save()
+        # required on Django >= 1.7 to keep the user authenticated
+        if hasattr(auth, "update_session_auth_hash"):
+            auth.update_session_auth_hash(self.request, user)
 
     def after_change_password(self):
         user = self.request.user
@@ -483,11 +511,11 @@ class ChangePasswordView(FormView):
         return redirect(self.get_success_url())
 
     def get_context_data(self, **kwargs):
-        ctx = kwargs
+        ctx = super(ChangePasswordView, self).get_context_data(**kwargs)
         redirect_field_name = self.get_redirect_field_name()
         ctx.update({
             "redirect_field_name": redirect_field_name,
-            "redirect_field_value": self.request.REQUEST.get(redirect_field_name, ""),
+            "redirect_field_value": self.request.POST.get(redirect_field_name, self.request.GET.get(redirect_field_name, "")),
         })
         return ctx
 
@@ -519,7 +547,7 @@ class PasswordResetView(FormView):
     token_generator = default_token_generator
 
     def get_context_data(self, **kwargs):
-        context = kwargs
+        context = super(PasswordResetView, self).get_context_data(**kwargs)
         if self.request.method == "POST" and "resend" in self.request.POST:
             context["resend"] = True
         return context
@@ -580,13 +608,13 @@ class PasswordResetTokenView(FormView):
         return self.render_to_response(ctx)
 
     def get_context_data(self, **kwargs):
-        ctx = kwargs
+        ctx = super(PasswordResetTokenView, self).get_context_data(**kwargs)
         redirect_field_name = self.get_redirect_field_name()
         ctx.update({
             "uidb36": self.kwargs["uidb36"],
             "token": self.kwargs["token"],
             "redirect_field_name": redirect_field_name,
-            "redirect_field_value": self.request.REQUEST.get(redirect_field_name, ""),
+            "redirect_field_value": self.request.POST.get(redirect_field_name, self.request.GET.get(redirect_field_name, "")),
         })
         return ctx
 
@@ -598,6 +626,8 @@ class PasswordResetTokenView(FormView):
     def after_change_password(self):
         user = self.get_user()
         signals.password_changed.send(sender=PasswordResetTokenView, user=user)
+        if settings.ACCOUNT_NOTIFY_ON_PASSWORD_CHANGE:
+            self.send_email(user)
         if self.messages.get("password_changed"):
             messages.add_message(
                 self.request,
@@ -636,6 +666,16 @@ class PasswordResetTokenView(FormView):
             "context": self.get_context_data()
         }
         return self.response_class(**response_kwargs)
+
+    def send_email(self, user):
+        protocol = getattr(settings, "DEFAULT_HTTP_PROTOCOL", "http")
+        current_site = get_current_site(self.request)
+        ctx = {
+            "user": user,
+            "protocol": protocol,
+            "current_site": current_site,
+        }
+        hookset.send_password_change_email([user.email], ctx)
 
 
 class SettingsView(LoginRequiredMixin, FormView):
@@ -694,11 +734,11 @@ class SettingsView(LoginRequiredMixin, FormView):
                 self.primary_email_address.change(email, confirm=confirm)
 
     def get_context_data(self, **kwargs):
-        ctx = kwargs
+        ctx = super(SettingsView, self).get_context_data(**kwargs)
         redirect_field_name = self.get_redirect_field_name()
         ctx.update({
             "redirect_field_name": redirect_field_name,
-            "redirect_field_value": self.request.REQUEST.get(redirect_field_name, ""),
+            "redirect_field_value": self.request.POST.get(redirect_field_name, self.request.GET.get(redirect_field_name, "")),
         })
         return ctx
 
@@ -747,7 +787,7 @@ class DeleteView(LogoutView):
         return redirect(self.get_redirect_url())
 
     def get_context_data(self, **kwargs):
-        ctx = super(DeleteView, self).get_context_data()
+        ctx = super(DeleteView, self).get_context_data(**kwargs)
         ctx.update(kwargs)
         ctx["ACCOUNT_DELETION_EXPUNGE_HOURS"] = settings.ACCOUNT_DELETION_EXPUNGE_HOURS
         return ctx
